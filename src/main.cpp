@@ -4,6 +4,8 @@
 #include <Geode/modify/LevelCell.hpp>
 #include <map>
 #include <vector>
+#include <cstdlib>
+#include <ctime>
 using namespace geode::prelude;
 
 // ===================== DATOS =====================
@@ -189,6 +191,18 @@ static GJDifficultySprite* findDiff(CCNode* root) {
     return nullptr;
 }
 
+// Busca el primer boton (el "View") dentro de una celda
+static CCMenuItemSpriteExtra* findViewButton(CCNode* root) {
+    if (!root) return nullptr;
+    if (auto b = typeinfo_cast<CCMenuItemSpriteExtra*>(root)) return b;
+    auto kids = root->getChildren();
+    if (!kids) return nullptr;
+    for (auto k : CCArrayExt<CCNode*>(kids)) {
+        if (auto r = findViewButton(k)) return r;
+    }
+    return nullptr;
+}
+
 // Si el nivel esta reclamado, reemplaza la cara de dificultad por la tuya
 static void applyFace(GJGameLevel* level, GJDifficultySprite* diff, bool withName) {
     if (!level || !diff || !diff->getParent()) return;
@@ -223,7 +237,6 @@ static void applyFace(GJGameLevel* level, GJDifficultySprite* diff, bool withNam
 class ClaimLayer : public CCLayer {
 public:
     int m_idx = 0;
-    TextInput* m_input = nullptr;
 
     static ClaimLayer* create(int idx) {
         auto l = new ClaimLayer();
@@ -271,34 +284,30 @@ public:
         // tu demon
         auto demons = loadDemons();
         if (m_idx >= 0 && m_idx < (int)demons.size()) {
-            auto face = makeFaceOf(demons[m_idx], 70.f);
-            face->setPosition({cx - 150.f, cy - 40.f});
+            auto face = makeFaceOf(demons[m_idx], 85.f);
+            face->setPosition({cx - 120.f, cy - 48.f});
             this->addChild(face);
             auto nm = CCLabelBMFont::create(demons[m_idx].name.c_str(), "bigFont.fnt");
             nm->setScale(0.4f);
-            nm->setPosition({cx - 150.f, cy - 82.f});
+            if (nm->getContentSize().width * 0.4f > 120.f) nm->setScale(120.f / nm->getContentSize().width);
+            nm->setPosition({cx - 120.f, cy - 100.f});
             this->addChild(nm);
         }
-
-        m_input = TextInput::create(230.f, "Level name or ID");
-        m_input->setPosition({cx + 20.f, cy - 15.f});
-        m_input->setMaxCharCount(30);
-        this->addChild(m_input);
 
         auto menu = CCMenu::create();
         menu->setPosition({0.f, 0.f});
 
-        auto searchBtn = CCMenuItemSpriteExtra::create(
-            makeButton("Search", "rbtn_green.png", 110.f, 38.f), this,
-            menu_selector(ClaimLayer::onSearch));
-        searchBtn->setPosition({cx - 25.f, cy - 62.f});
-        menu->addChild(searchBtn);
+        auto mostBtn = CCMenuItemSpriteExtra::create(
+            makeButton("Most Downloaded", "rbtn_green.png", 190.f, 40.f), this,
+            menu_selector(ClaimLayer::onMost));
+        mostBtn->setPosition({cx + 55.f, cy - 25.f});
+        menu->addChild(mostBtn);
 
-        auto idBtn = CCMenuItemSpriteExtra::create(
-            makeButton("Claim ID", "rbtn_green.png", 110.f, 38.f), this,
-            menu_selector(ClaimLayer::onClaimId));
-        idBtn->setPosition({cx + 95.f, cy - 62.f});
-        menu->addChild(idBtn);
+        auto randBtn = CCMenuItemSpriteExtra::create(
+            makeButton("Random", "rbtn_green.png", 190.f, 40.f), this,
+            menu_selector(ClaimLayer::onRandom));
+        randBtn->setPosition({cx + 55.f, cy - 75.f});
+        menu->addChild(randBtn);
 
         auto back = makeBackButton(this, menu_selector(ClaimLayer::onBack));
         back->setPosition({25.f, win.height - 25.f});
@@ -306,128 +315,30 @@ public:
         this->addChild(menu);
 
         auto hint = CCLabelBMFont::create(
-            "Search a level, open it and press Claim.", "chatFont.fnt");
+            "Tap Claim on a free level to give it your demon.", "chatFont.fnt");
         hint->setScale(0.8f);
-        hint->setPosition({cx + 20.f, 30.f});
+        hint->setPosition({cx, 22.f});
         this->addChild(hint);
 
         this->setKeypadEnabled(true);
         return true;
     }
 
-    void onSearch(CCObject*) {
-        std::string q = m_input->getString();
-        if (q.empty()) {
-            FLAlertLayer::create("Last Step", "Escribi el nombre o el ID de un nivel.", "OK")->show();
-            return;
-        }
+    void openList(bool randomPage) {
         g_claiming = m_idx;
-        auto obj = GJSearchObject::create(SearchType::Search, q);
-        CCDirector::get()->pushScene(CCTransitionFade::create(0.5f, LevelBrowserLayer::scene(obj)));
+        static bool seeded = false;
+        if (!seeded) { std::srand((unsigned)std::time(nullptr)); seeded = true; }
+        auto obj = GJSearchObject::create(SearchType::MostDownloaded);
+        if (randomPage) obj->m_page = std::rand() % 150;
+        CCDirector::get()->pushScene(
+            CCTransitionFade::create(0.5f, LevelBrowserLayer::scene(obj)));
     }
 
-    void onClaimId(CCObject*) {
-        int id = std::atoi(std::string(m_input->getString()).c_str());
-        if (id <= 0) {
-            FLAlertLayer::create("Last Step", "Escribi un ID de nivel valido (numero).", "OK")->show();
-            return;
-        }
-        auto claims = loadClaims();
-        if (claims.count(id)) {
-            FLAlertLayer::create("Taken", "Ese nivel ya fue reclamado (Taken).", "OK")->show();
-            return;
-        }
-        claims[id] = m_idx;
-        saveClaims(claims);
-        FLAlertLayer::create("Last Step", "Nivel reclamado! Ahora tiene tu dificultad.", "OK")->show();
-    }
+    void onMost(CCObject*) { openList(false); }
+    void onRandom(CCObject*) { openList(true); }
 
     void onBack(CCObject*) { g_claiming = -1; CCDirector::get()->popScene(); }
     void keyBackClicked() override { g_claiming = -1; CCDirector::get()->popScene(); }
-};
-
-// ===================== PANTALLA: MY DEMONS (See more) =====================
-class MyDemonsLayer : public CCLayer {
-public:
-    CREATE_FUNC(MyDemonsLayer);
-
-    static CCScene* scene() {
-        auto s = CCScene::create();
-        s->addChild(MyDemonsLayer::create());
-        return s;
-    }
-
-    bool init() override {
-        if (!CCLayer::init()) return false;
-        auto win = CCDirector::get()->getWinSize();
-        addBackground(this);
-
-        auto title = CCLabelBMFont::create("My Demons", "goldFont.fnt");
-        title->setPosition({win.width / 2, win.height - 28.f});
-        this->addChild(title);
-
-        auto menu = CCMenu::create();
-        menu->setPosition({0.f, 0.f});
-
-        auto demons = loadDemons();
-        if (demons.empty()) {
-            auto none = CCLabelBMFont::create("No demons yet.", "bigFont.fnt");
-            none->setScale(0.6f);
-            none->setPosition({win.width / 2, win.height / 2});
-            this->addChild(none);
-        }
-
-        // los ultimos 8, el mas nuevo primero
-        int shown = 0;
-        for (int i = (int)demons.size() - 1; i >= 0 && shown < 8; i--, shown++) {
-            int col = shown % 4;
-            int row = shown / 4;
-            float x = win.width / 2 + (col - 1.5f) * 134.f;
-            float y = win.height / 2 + 45.f - row * 118.f;
-
-            auto cell = CCNode::create();
-            cell->setContentSize({126.f, 108.f});
-            cell->setAnchorPoint({0.5f, 0.5f});
-            if (auto panel = makePanel("panel_brown.png", 126.f, 108.f)) {
-                panel->setPosition({63.f, 54.f});
-                cell->addChild(panel);
-            }
-            auto face = makeFaceOf(demons[i], 62.f);
-            face->setPosition({63.f, 66.f});
-            cell->addChild(face);
-            auto nm = CCLabelBMFont::create(demons[i].name.c_str(), "bigFont.fnt");
-            nm->setScale(0.38f);
-            if (nm->getContentSize().width * 0.38f > 110.f) nm->setScale(110.f / nm->getContentSize().width);
-            nm->setPosition({63.f, 26.f});
-            cell->addChild(nm);
-            auto sub = CCLabelBMFont::create(
-                fmt::format("{} claimed - tap", claimedCount(i)).c_str(), "chatFont.fnt");
-            sub->setScale(0.6f);
-            sub->setPosition({63.f, 11.f});
-            cell->addChild(sub);
-
-            auto btn = CCMenuItemSpriteExtra::create(cell, this, menu_selector(MyDemonsLayer::onPick));
-            btn->setTag(i);
-            btn->setPosition({x, y});
-            menu->addChild(btn);
-        }
-
-        auto back = makeBackButton(this, menu_selector(MyDemonsLayer::onBack));
-        back->setPosition({25.f, win.height - 25.f});
-        menu->addChild(back);
-        this->addChild(menu);
-
-        this->setKeypadEnabled(true);
-        return true;
-    }
-
-    void onPick(CCObject* sender) {
-        int idx = static_cast<CCNode*>(sender)->getTag();
-        CCDirector::get()->pushScene(CCTransitionFade::create(0.5f, ClaimLayer::scene(idx)));
-    }
-
-    void onBack(CCObject*) { CCDirector::get()->popScene(); }
-    void keyBackClicked() override { CCDirector::get()->popScene(); }
 };
 
 // ===================== PANTALLA: CREATE A DEMON =====================
@@ -620,7 +531,12 @@ public:
     }
 
     void onMore(CCObject*) {
-        CCDirector::get()->pushScene(CCTransitionFade::create(0.5f, MyDemonsLayer::scene()));
+        int count = Mod::get()->getSavedValue<int>("count", 0);
+        if (count <= 0) {
+            FLAlertLayer::create("See more", "Primero crea y sube un demon (flecha verde).", "OK")->show();
+            return;
+        }
+        CCDirector::get()->pushScene(CCTransitionFade::create(0.5f, ClaimLayer::scene(count - 1)));
     }
 
     void onBack(CCObject*) { CCDirector::get()->popScene(); }
@@ -665,50 +581,88 @@ class $modify(DemonCreatorLayer, CreatorLayer) {
     }
 };
 
-// ===================== PAGINA DE UN NIVEL: Claim / Taken + tu cara =====================
+// ===================== PAGINA DE UN NIVEL: tu cara =====================
 class $modify(DemonInfoLayer, LevelInfoLayer) {
     bool init(GJGameLevel* level, bool challenge) {
         if (!LevelInfoLayer::init(level, challenge)) return false;
         applyFace(level, m_difficultySprite, true);
-
-        if (g_claiming >= 0) {
-            auto win = CCDirector::get()->getWinSize();
-            bool taken = loadClaims().count(level->m_levelID) > 0;
-            auto btnNode = taken
-                ? makeButton("Taken", "rbtn_red.png", 110.f, 38.f)
-                : makeButton("Claim", "rbtn_green.png", 110.f, 38.f);
-            auto btn = CCMenuItemSpriteExtra::create(btnNode, this,
-                menu_selector(DemonInfoLayer::onDemonClaim));
-            auto menu = CCMenu::create();
-            menu->addChild(btn);
-            menu->setPosition({75.f, 38.f});
-            menu->setTag(9100);
-            this->addChild(menu, 50);
-        }
         return true;
-    }
-
-    void onDemonClaim(CCObject*) {
-        if (g_claiming < 0 || !m_level) return;
-        auto claims = loadClaims();
-        int id = m_level->m_levelID;
-        if (claims.count(id)) {
-            FLAlertLayer::create("Taken", "Ese nivel ya fue reclamado (Taken).", "OK")->show();
-            return;
-        }
-        claims[id] = g_claiming;
-        saveClaims(claims);
-        g_claiming = -1;
-        this->removeChildByTag(9100);
-        applyFace(m_level, m_difficultySprite, true);
-        FLAlertLayer::create("Claimed!", "Ahora este nivel tiene tu dificultad.", "OK")->show();
     }
 };
 
-// ===================== LISTAS DE NIVELES: tu cara en las celdas =====================
+// ===================== LISTAS DE NIVELES: tu cara + Claim / Taken =====================
 class $modify(DemonCell, LevelCell) {
     void loadFromLevel(GJGameLevel* level) {
         LevelCell::loadFromLevel(level);
         applyFace(level, findDiff(this), false);
+        if (g_claiming >= 0 && level) this->addClaimUI(level);
+    }
+
+    void addClaimUI(GJGameLevel* level) {
+        CCNode* menuNode = nullptr;
+        CCPoint pos = {0.f, 0.f};
+        auto view = findViewButton(this);
+        if (view && view->getParent()) {
+            menuNode = view->getParent();
+            pos = view->getPosition();
+            view->setVisible(false);
+            view->setEnabled(false);
+        } else {
+            auto m = CCMenu::create();
+            m->setPosition({0.f, 0.f});
+            this->addChild(m, 100);
+            menuNode = m;
+            auto sz = this->getContentSize();
+            pos = {sz.width - 48.f, sz.height * 0.4f};
+        }
+        this->claimButtonIn(menuNode, pos, level);
+    }
+
+    void claimButtonIn(CCNode* menu, CCPoint pos, GJGameLevel* level) {
+        auto claims = loadClaims();
+        auto it = claims.find(level->m_levelID);
+        bool taken = (it != claims.end());
+        auto node = makeButton(taken ? "Taken" : "Claim",
+            taken ? "rbtn_red.png" : "rbtn_green.png", 76.f, 30.f);
+        auto btn = CCMenuItemSpriteExtra::create(node, this,
+            menu_selector(DemonCell::onClaimCell));
+        btn->setPosition(pos);
+        btn->setUserObject(level);
+        menu->addChild(btn);
+
+        if (taken) {
+            auto demons = loadDemons();
+            if (it->second >= 0 && it->second < (int)demons.size()) {
+                auto lbl = CCLabelBMFont::create(demons[it->second].name.c_str(), "bigFont.fnt");
+                lbl->setScale(0.28f);
+                lbl->setPosition({pos.x, pos.y + 24.f});
+                menu->addChild(lbl);
+            }
+        }
+    }
+
+    void onClaimCell(CCObject* sender) {
+        auto btn = static_cast<CCNode*>(sender);
+        auto level = static_cast<GJGameLevel*>(btn->getUserObject());
+        if (!level) return;
+        auto claims = loadClaims();
+        if (claims.count(level->m_levelID)) {
+            FLAlertLayer::create("Taken", "Ese nivel ya fue reclamado (Taken).", "OK")->show();
+            return;
+        }
+        if (g_claiming < 0) {
+            FLAlertLayer::create("Claim", "Ya reclamaste un nivel con este demon.", "OK")->show();
+            return;
+        }
+        claims[level->m_levelID] = g_claiming;
+        saveClaims(claims);
+        g_claiming = -1;
+
+        auto menu = btn->getParent();
+        CCPoint pos = btn->getPosition();
+        this->claimButtonIn(menu, pos, level);
+        btn->removeFromParent();
+        applyFace(level, findDiff(this), false);
+        FLAlertLayer::create("Claimed!", "Ahora este nivel tiene tu dificultad.", "OK")->show();
     }
 };
