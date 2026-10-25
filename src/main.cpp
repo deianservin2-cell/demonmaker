@@ -110,7 +110,8 @@ public:
         m_preview->removeAllChildren();
         for (int i = 0; i < 4; i++) {
             auto file = fmt::format("{}_{}.png", PART_NAMES[i], m_sel[i]);
-            auto spr = CCSprite::create(Mod::get()->expandSpriteName(file.c_str()));
+            std::string path = Mod::get()->expandSpriteName(file.c_str());
+            auto spr = CCSprite::create(path.c_str());
             if (!spr) continue;
             spr->setScale(0.6f);
             m_preview->addChild(spr);
