@@ -2,18 +2,15 @@
 #include <Geode/modify/CreatorLayer.hpp>
 using namespace geode::prelude;
 
-static const ccColor3B PALETTE[] = {
-    {160, 60, 200}, {200, 50, 50}, {60, 120, 230}, {60, 190, 90},
-    {240, 170, 40}, {240, 240, 240}, {40, 40, 40}
-};
-constexpr int PALETTE_N = 7;
+static const char* PART_NAMES[4] = {"body", "horns", "eyes", "mouth"};
+static const char* PART_LABELS[4] = {"Body", "Horns", "Eyes", "Mouth"};
+static const int PART_COUNT[4] = {5, 4, 4, 4};
 
 class DemonMakerLayer : public CCLayer {
 public:
-    int m_body = 0;
-    int m_eyes = 5;
+    int m_sel[4] = {0, 0, 0, 0};
     TextInput* m_name = nullptr;
-    CCDrawNode* m_preview = nullptr;
+    CCNode* m_preview = nullptr;
     CCLabelBMFont* m_info = nullptr;
 
     CREATE_FUNC(DemonMakerLayer);
@@ -32,41 +29,43 @@ public:
         this->addChild(bg, -2);
 
         auto title = CCLabelBMFont::create("Create a Demon", "goldFont.fnt");
-        title->setPosition({win.width / 2, win.height - 30.f});
+        title->setPosition({win.width / 2, win.height - 28.f});
         this->addChild(title);
 
-        m_preview = CCDrawNode::create();
-        this->addChild(m_preview);
-        redraw();
-
-        m_name = TextInput::create(200.f, "Difficulty name");
-        m_name->setPosition({win.width / 2, 60.f});
-        m_name->setMaxCharCount(16);
-        this->addChild(m_name);
+        // Panel oscuro a la izquierda con los 4 selectores
+        auto panel = CCLayerColor::create(ccc4(0, 40, 130, 200), 190.f, 215.f);
+        panel->setPosition({20.f, win.height / 2 - 112.f});
+        this->addChild(panel, -1);
 
         auto menu = CCMenu::create();
         menu->setPosition({0.f, 0.f});
-        float cx = win.width / 2;
-        float cy = win.height / 2;
 
-        addArrow(menu, true,  cx - 110.f, cy + 40.f, 0, -1);
-        addArrow(menu, false, cx + 110.f, cy + 40.f, 0, +1);
-        addArrow(menu, true,  cx - 110.f, cy - 10.f, 1, -1);
-        addArrow(menu, false, cx + 110.f, cy - 10.f, 1, +1);
+        for (int i = 0; i < 4; i++) {
+            float y = win.height / 2 + 75.f - i * 50.f;
+            addArrow(menu, true, 45.f, y, i, -1);
+            addArrow(menu, false, 185.f, y, i, +1);
+            auto lbl = CCLabelBMFont::create(PART_LABELS[i], "bigFont.fnt");
+            lbl->setScale(0.45f);
+            lbl->setPosition({115.f, y});
+            this->addChild(lbl);
+        }
 
-        auto lbl1 = CCLabelBMFont::create("Body", "bigFont.fnt");
-        lbl1->setScale(0.4f);
-        lbl1->setPosition({cx - 160.f, cy + 40.f});
-        this->addChild(lbl1);
-        auto lbl2 = CCLabelBMFont::create("Eyes", "bigFont.fnt");
-        lbl2->setScale(0.4f);
-        lbl2->setPosition({cx - 160.f, cy - 10.f});
-        this->addChild(lbl2);
+        float rx = win.width * 0.70f;
+
+        m_preview = CCNode::create();
+        m_preview->setPosition({rx, win.height / 2 + 25.f});
+        this->addChild(m_preview);
+        redraw();
+
+        m_name = TextInput::create(190.f, "Difficulty name");
+        m_name->setPosition({rx - 20.f, 55.f});
+        m_name->setMaxCharCount(16);
+        this->addChild(m_name);
 
         auto saveBtn = CCMenuItemSpriteExtra::create(
             ButtonSprite::create("Save"), this,
             menu_selector(DemonMakerLayer::onSave));
-        saveBtn->setPosition({cx + 150.f, 60.f});
+        saveBtn->setPosition({rx + 105.f, 55.f});
         menu->addChild(saveBtn);
 
         auto backSpr = CCSprite::createWithSpriteFrameName("GJ_arrow_03_001.png");
@@ -80,8 +79,8 @@ public:
         int count = Mod::get()->getSavedValue<int>("count", 0);
         m_info = CCLabelBMFont::create(
             fmt::format("Saved demons: {}", count).c_str(), "bigFont.fnt");
-        m_info->setScale(0.4f);
-        m_info->setPosition({win.width / 2, 25.f});
+        m_info->setScale(0.35f);
+        m_info->setPosition({win.width / 2, 15.f});
         this->addChild(m_info);
 
         this->setKeypadEnabled(true);
@@ -102,22 +101,20 @@ public:
         int tag = static_cast<CCNode*>(sender)->getTag();
         int which = tag / 10;
         int dir = (tag % 10 == 2) ? 1 : -1;
-        int& target = (which == 0) ? m_body : m_eyes;
-        target = (target + dir + PALETTE_N) % PALETTE_N;
+        int n = PART_COUNT[which];
+        m_sel[which] = (m_sel[which] + dir + n) % n;
         redraw();
     }
 
     void redraw() {
-        auto win = CCDirector::get()->getWinSize();
-        CCPoint c = {win.width / 2, win.height / 2 + 15.f};
-        m_preview->clear();
-        auto body = ccc4FFromccc3B(PALETTE[m_body]);
-        auto eyes = ccc4FFromccc3B(PALETTE[m_eyes]);
-        m_preview->drawDot(c, 45.f, body);
-        m_preview->drawDot({c.x - 16.f, c.y + 8.f}, 8.f, eyes);
-        m_preview->drawDot({c.x + 16.f, c.y + 8.f}, 8.f, eyes);
-        m_preview->drawSegment({c.x - 18.f, c.y - 18.f}, {c.x + 18.f, c.y - 18.f},
-                               3.f, ccc4f(1.f, 1.f, 1.f, 1.f));
+        m_preview->removeAllChildren();
+        for (int i = 0; i < 4; i++) {
+            auto file = fmt::format("{}_{}.png", PART_NAMES[i], m_sel[i]);
+            auto spr = CCSprite::create(Mod::get()->expandSpriteName(file.c_str()));
+            if (!spr) continue;
+            spr->setScale(0.6f);
+            m_preview->addChild(spr);
+        }
     }
 
     void onSave(CCObject*) {
@@ -127,7 +124,8 @@ public:
             return;
         }
         int count = Mod::get()->getSavedValue<int>("count", 0);
-        std::string data = fmt::format("{}|{}|{}", name, m_body, m_eyes);
+        std::string data = fmt::format("{}|{}|{}|{}|{}", name,
+            m_sel[0], m_sel[1], m_sel[2], m_sel[3]);
         Mod::get()->setSavedValue<std::string>(fmt::format("demon_{}", count), data);
         Mod::get()->setSavedValue<int>("count", count + 1);
         m_info->setString(fmt::format("Saved demons: {}", count + 1).c_str());
@@ -162,4 +160,3 @@ class $modify(DemonCreatorLayer, CreatorLayer) {
         CCDirector::get()->pushScene(CCTransitionFade::create(0.5f, scene));
     }
 };
-
