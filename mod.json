@@ -1,0 +1,9 @@
+{
+  "geode": "5.11.2",
+  "gd": { "win": "2.2081", "android": "2.2081" },
+  "id": "tunombre.demonmaker",
+  "name": "Demon Maker",
+  "version": "v1.0.0",
+  "developer": "tunombre",
+  "description": "Crea tus propias dificultades demon."
+}
