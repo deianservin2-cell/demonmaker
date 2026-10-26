@@ -20,6 +20,7 @@ static int g_claiming = -1; // indice del demon que se esta reclamando (-1 = nin
 struct Demon {
     std::string name;
     int p[4];
+    std::string photo; // archivo de foto (vacio = usa las piezas)
 };
 
 static std::vector<Demon> loadDemons() {
@@ -39,6 +40,7 @@ static std::vector<Demon> loadDemons() {
             start = pos + 1;
         }
         if (!parts.empty() && !parts[0].empty()) d.name = parts[0];
+        if ((int)parts.size() > 5) d.photo = parts[5];
         for (int k = 0; k < 4; k++) {
             if ((int)parts.size() > k + 1) d.p[k] = std::atoi(parts[k + 1].c_str());
         }
@@ -49,7 +51,7 @@ static std::vector<Demon> loadDemons() {
 
 static int saveDemon(Demon const& d) {
     int count = Mod::get()->getSavedValue<int>("count", 0);
-    std::string data = fmt::format("{}|{}|{}|{}|{}", d.name, d.p[0], d.p[1], d.p[2], d.p[3]);
+    std::string data = fmt::format("{}|{}|{}|{}|{}|{}", d.name, d.p[0], d.p[1], d.p[2], d.p[3], d.photo);
     Mod::get()->setSavedValue<std::string>(fmt::format("demon_{}", count), data);
     Mod::get()->setSavedValue<int>("count", count + 1);
     return count;
@@ -108,8 +110,34 @@ static CCNode* makeFace(const int p[4], float canvas) {
     return node;
 }
 
+// Sprite de una foto guardada, ajustada a un cuadrado de "canvas" puntos
+static CCSprite* makePhotoSprite(std::string const& file, float canvas) {
+    if (file.empty()) return nullptr;
+    std::string path = (Mod::get()->getSaveDir() / "photos" / file).string();
+    auto s = CCSprite::create(path.c_str());
+    if (!s) return nullptr;
+    auto sz = s->getContentSize();
+    float m = std::max(sz.width, sz.height);
+    if (m <= 0.f) return nullptr;
+    s->setScale(canvas / m);
+    return s;
+}
+
+// Cara completa: si hay foto usa la foto, si no las 4 piezas
+static CCNode* makeFaceFull(const int p[4], std::string const& photo, float canvas) {
+    if (auto ph = makePhotoSprite(photo, canvas)) {
+        auto node = CCNode::create();
+        node->setContentSize({canvas, canvas});
+        node->setAnchorPoint({0.5f, 0.5f});
+        ph->setPosition({canvas / 2, canvas / 2});
+        node->addChild(ph);
+        return node;
+    }
+    return makeFace(p, canvas);
+}
+
 static CCNode* makeFaceOf(Demon const& d, float canvas) {
-    return makeFace(d.p, canvas);
+    return makeFaceFull(d.p, d.photo, canvas);
 }
 
 static cocos2d::extension::CCScale9Sprite* makePanel(const char* file, float w, float h) {
@@ -345,6 +373,8 @@ public:
 class DemonMakerLayer : public CCLayer {
 public:
     int m_sel[4] = {0, 0, 0, 0};
+    std::string m_photo;
+    EventListener<Task<Result<std::filesystem::path>>> m_pickListener;
     TextInput* m_name = nullptr;
     CCNode* m_faceHolder = nullptr;
     CCNode* m_rowHolders[4] = {nullptr, nullptr, nullptr, nullptr};
@@ -420,6 +450,19 @@ public:
         moreBtn->setPosition({rx + 85.f, 48.f});
         menu->addChild(moreBtn);
 
+        float topY = win.height / 2 + 38.f + 56.f;
+        auto photoBtn = CCMenuItemSpriteExtra::create(
+            makeButton("Photo", "rbtn_green.png", 74.f, 28.f), this,
+            menu_selector(DemonMakerLayer::onPhoto));
+        photoBtn->setPosition({rx + 88.f, topY});
+        menu->addChild(photoBtn);
+
+        auto clearBtn = CCMenuItemSpriteExtra::create(
+            makeButton("Clear", "rbtn_red.png", 64.f, 28.f), this,
+            menu_selector(DemonMakerLayer::onClearPhoto));
+        clearBtn->setPosition({rx - 92.f, topY});
+        menu->addChild(clearBtn);
+
         auto moreLbl = CCLabelBMFont::create("See more!", "goldFont.fnt");
         moreLbl->setScale(0.45f);
         moreLbl->setPosition({rx + 85.f, 12.f});
@@ -457,7 +500,7 @@ public:
     void redraw() {
         // cara grande
         m_faceHolder->removeAllChildren();
-        auto face = makeFace(m_sel, 175.f);
+        auto face = makeFaceFull(m_sel, m_photo, 175.f);
         face->setPosition({0.f, 0.f});
         m_faceHolder->addChild(face);
 
@@ -477,6 +520,7 @@ public:
         Demon d;
         d.name = name;
         for (int k = 0; k < 4; k++) d.p[k] = m_sel[k];
+        d.photo = m_photo;
         return d;
     }
 
@@ -507,7 +551,7 @@ public:
             FLAlertLayer::create("Export", "No se pudo crear la imagen.", "OK")->show();
             return;
         }
-        auto face = makeFace(m_sel, 256.f);
+        auto face = makeFaceFull(m_sel, m_photo, 256.f);
         face->setPosition({128.f, 168.f});
         auto lbl = CCLabelBMFont::create(name.c_str(), "bigFont.fnt");
         lbl->setScale(0.9f);
@@ -528,6 +572,57 @@ public:
         } else {
             FLAlertLayer::create("Export", "No se pudo guardar la imagen.", "OK")->show();
         }
+    }
+
+    void applyPhoto(std::filesystem::path const& src) {
+        std::error_code ec;
+        auto dir = Mod::get()->getSaveDir() / "photos";
+        std::filesystem::create_directories(dir, ec);
+        std::string ext = src.extension().string();
+        for (auto& c : ext) c = (char)std::tolower((unsigned char)c);
+        if (ext != ".png" && ext != ".jpg" && ext != ".jpeg") ext = ".png";
+        std::string name = fmt::format("photo_{}{}", (long long)std::time(nullptr), ext);
+        std::filesystem::copy_file(src, dir / name,
+            std::filesystem::copy_options::overwrite_existing, ec);
+        if (ec) {
+            FLAlertLayer::create("Photo", "No se pudo copiar la imagen.", "OK")->show();
+            return;
+        }
+        m_photo = name;
+        redraw();
+    }
+
+    void onPhoto(CCObject*) {
+        // Plan B: si pusiste face.png / face.jpg en la carpeta de datos del mod, la usa
+        auto base = Mod::get()->getSaveDir();
+        for (auto const& n : {"face.png", "face.jpg", "face.jpeg"}) {
+            if (std::filesystem::exists(base / n)) {
+                applyPhoto(base / n);
+                return;
+            }
+        }
+        m_pickListener.bind([this](Task<Result<std::filesystem::path>>::Event* event) {
+            if (auto res = event->getValue()) {
+                if (res->isOk()) {
+                    applyPhoto(res->unwrap());
+                } else {
+                    std::string err = res->unwrapErr();
+                    if (err.find("ancel") == std::string::npos) {
+                        FLAlertLayer::create("Photo",
+                            fmt::format("No se pudo abrir el selector.\nPon tu imagen como face.png en:\n{}",
+                                Mod::get()->getSaveDir().string()).c_str(), "OK")->show();
+                    }
+                }
+            }
+        });
+        utils::file::FilePickOptions opts;
+        opts.filters.push_back({"Images", {"*.png", "*.jpg", "*.jpeg"}});
+        m_pickListener.setFilter(utils::file::pick(utils::file::PickMode::OpenFile, opts));
+    }
+
+    void onClearPhoto(CCObject*) {
+        m_photo.clear();
+        redraw();
     }
 
     void onMore(CCObject*) {
