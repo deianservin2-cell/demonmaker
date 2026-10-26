@@ -356,7 +356,10 @@ public:
         g_claiming = m_idx;
         static bool seeded = false;
         if (!seeded) { std::srand((unsigned)std::time(nullptr)); seeded = true; }
-        auto obj = GJSearchObject::create(SearchType::MostDownloaded);
+        
+        // CORRECCIÓN 1: Se usa SearchType::Downloaded en lugar de MostDownloaded
+        auto obj = GJSearchObject::create(SearchType::Downloaded);
+        
         if (randomPage) obj->m_page = std::rand() % 150;
         CCDirector::get()->pushScene(
             CCTransitionFade::create(0.5f, LevelBrowserLayer::scene(obj)));
@@ -708,7 +711,9 @@ class $modify(DemonCell, LevelCell) {
             this->addChild(m, 100);
             menuNode = m;
             auto sz = this->getContentSize();
-            pos = {sz.width - 48.f, sz.height * 0.4f};
+            
+            // CORRECCIÓN 2: Uso explícito de CCPoint en lugar de la inicialización abreviada de llaves
+            pos = CCPoint(sz.width - 48.f, sz.height * 0.4f);
         }
         this->claimButtonIn(menuNode, pos, level);
     }
